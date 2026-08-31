@@ -29,6 +29,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Restore dsh-full-remote state
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.DSH_PROFILE_HOME }}
+          key: dsh-full-remote-state-${{ runner.os }}-${{ github.repository }}-${{ github.run_id }}
+          restore-keys: |
+            dsh-full-remote-state-${{ runner.os }}-${{ github.repository }}-
+
       - name: Install Node.js 24 system-wide
         shell: bash
         run: |
@@ -92,36 +100,6 @@ jobs:
           dsh plugin --profile web add github:JUANWANG-BUAA/dsh-full-remote
           dsh plugin --profile web list
 
-      - name: Configure persistent dsh-full-remote access token
-        env:
-          DSH_REMOTE_TOKEN: ${{ secrets.DSH_REMOTE_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$DSH_REMOTE_TOKEN"
-          test "${#DSH_REMOTE_TOKEN}" -ge 24
-          mkdir -p "$DSH_PROFILE_HOME"
-          umask 077
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          token = os.environ["DSH_REMOTE_TOKEN"]
-          state = {
-              "enabled": True,
-              "accessToken": token,
-              "listenHost": "127.0.0.1",
-              "listenPort": 3081,
-              "sessions": [],
-          }
-          path = Path(os.environ["DSH_PROFILE_HOME"]) / "reverse-proxy.json"
-          path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
-          os.chmod(path, 0o600)
-          print(f"Created persistent dsh-full-remote state at {path}")
-          print("Access token configured from GitHub Actions secret DSH_REMOTE_TOKEN")
-          PY
-
       - name: Configure Git for Harness commits
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -155,7 +133,7 @@ jobs:
             sleep 5
           done
 
-      - name: Start dsh-full-remote proxy with persistent token
+      - name: Start dsh-full-remote proxy with plugin-managed token
         run: |
           set -euxo pipefail
           curl -fsS \
@@ -294,10 +272,18 @@ jobs:
           echo "Node: $(node --version)"
           echo "pnpm: $(pnpm --version)"
           echo "Run ID: ${{ github.run_id }}"
+          echo "Reverse proxy token: generated and managed by dsh-full-remote"
           echo "=============================================="
 
       - name: Keep alive for 5 hours
         run: sleep 5h
+
+      - name: Save dsh-full-remote state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.DSH_PROFILE_HOME }}
+          key: dsh-full-remote-state-${{ runner.os }}-${{ github.repository }}-${{ github.run_id }}
 
       - name: Commit Markdown created by Harness
         run: |
