@@ -12,6 +12,8 @@ env:
   OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
   OPENROUTER_MODEL: 'nvidia/nemotron-3-ultra-550b-a55b:free'
   CLOUDFLARE_HOSTNAME: dsh.ap2.ccwu.cc
+  NODE_VERSION: '24.11.1'
+  PNPM_VERSION: '10.26.0'
 
 jobs:
   deepseek-harness:
@@ -25,16 +27,50 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24.11.1
+      - name: Install Node.js 24 system-wide
+        shell: bash
+        run: |
+          set -euxo pipefail
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.26.0
-          run_install: false
+          curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
+          sudo apt-get install -y nodejs
+
+          # Make Node 24 the system Node used by every later process,
+          # including pnpm lifecycle/prepare scripts.
+          sudo ln -sf "$(command -v node)" /usr/local/bin/node
+          sudo ln -sf "$(command -v npm)" /usr/local/bin/npm
+          sudo ln -sf "$(command -v npx)" /usr/local/bin/npx
+
+          node --version
+          npm --version
+          command -v node
+          readlink -f "$(command -v node)"
+
+      - name: Install pnpm 10.26.0 with Node 24
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          npm install --global "pnpm@${PNPM_VERSION}"
+          hash -r
+
+          pnpm --version
+          pnpm exec node --version
+          node --version
+          command -v pnpm
+          pnpm config get node-linker || true
+
+      - name: Verify Node runtime used by package managers
+        shell: bash
+        run: |
+          set -euxo pipefail
+          echo "PATH=$PATH"
+          echo "node=$(command -v node)"
+          echo "npm=$(command -v npm)"
+          echo "pnpm=$(command -v pnpm)"
+          node --version
+          npm exec -- node --version
+          pnpm exec node --version
 
       - name: Install DeepSeek Harness
         run: npm install -g @deepseek-ai/dsh
@@ -44,14 +80,21 @@ jobs:
           node --version
           dsh --version
           pnpm --version
+          pnpm exec node --version
 
       - name: Install dsh-full-remote
         run: |
+          set -euxo pipefail
           mkdir -p /home/runner/.dsh/profiles/web
           cat > /home/runner/.dsh/profiles/web/pnpm-workspace.yaml <<'EOF'
           allowBuilds:
             dsh-full-remote: true
           EOF
+
+          # Explicitly prove the lifecycle environment is using Node 24.
+          node --version
+          pnpm exec node --version
+
           dsh plugin --profile web add github:JUANWANG-BUAA/dsh-full-remote
           dsh plugin --profile web list
 
@@ -156,6 +199,8 @@ jobs:
           echo "Model: ${OPENROUTER_MODEL}"
           echo "Provider: OpenRouter"
           echo "Blog content directory: ${GITHUB_WORKSPACE}/content"
+          echo "Node: $(node --version)"
+          echo "pnpm: $(pnpm --version)"
           echo "Run ID: ${{ github.run_id }}"
           echo "=============================================="
 
@@ -179,6 +224,9 @@ jobs:
         run: |
           if [ -f /tmp/cloudflared.pid ]; then
             kill "$(cat /tmp/cloudflared.pid)" 2>/dev/null || true
+          fi
+          if [ -f /tmp/dsh.pid ]; then
+            kill "$(cat /tmp/dsh.pid)" 2>/dev/null || true
           fi
           rm -f /tmp/cloudflared-token
 
