@@ -48,9 +48,9 @@ jobs:
         run: |
           mkdir -p /home/runner/.dsh/profiles/web
           cat > /home/runner/.dsh/profiles/web/pnpm-workspace.yaml <<'EOF'
-allowBuilds:
-  dsh-full-remote: true
-EOF
+          allowBuilds:
+            dsh-full-remote: true
+          EOF
           dsh plugin --profile web add github:JUANWANG-BUAA/dsh-full-remote
           dsh plugin --profile web list
 
