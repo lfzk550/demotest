@@ -49,6 +49,11 @@ jobs:
 
       - name: Install dsh-full-remote
         run: |
+          mkdir -p /home/runner/.dsh/profiles/web
+          cat > /home/runner/.dsh/profiles/web/pnpm-workspace.yaml <<'EOF'
+onlyBuiltDependencies:
+  - "dsh-full-remote@https://codeload.github.com/JUANWANG-BUAA/dsh-full-remote/tar.gz/abd0dfd62e7c02199cb10c8796e4b6c2152eda5c"
+EOF
           dsh plugin --profile web add github:JUANWANG-BUAA/dsh-full-remote
 
       - name: Configure Git for Harness commits
