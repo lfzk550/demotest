@@ -46,12 +46,11 @@ jobs:
           npm install --global "pnpm@${PNPM_VERSION}"
           hash -r
           pnpm --version
-          pnpm node --version
           node --version
           command -v pnpm
           pnpm config get node-linker || true
 
-      - name: Verify Node runtime used by package managers
+      - name: Verify Node runtime
         shell: bash
         run: |
           set -euxo pipefail
@@ -61,7 +60,6 @@ jobs:
           echo "pnpm=$(command -v pnpm)"
           node --version
           npm exec -- node --version
-          pnpm node --version
 
       - name: Install DeepSeek Harness
         run: npm install -g @deepseek-ai/dsh
@@ -71,7 +69,6 @@ jobs:
           node --version
           dsh --version
           pnpm --version
-          pnpm node --version
 
       - name: Install dsh-full-remote
         run: |
@@ -83,7 +80,7 @@ jobs:
           EOF
 
           node --version
-          pnpm node --version
+          pnpm --version
 
           dsh plugin --profile web add github:JUANWANG-BUAA/dsh-full-remote
           dsh plugin --profile web list
@@ -168,12 +165,10 @@ jobs:
           test -n "$CLOUDFLARE_TUNNEL_TOKEN"
           printf '%s' "$CLOUDFLARE_TUNNEL_TOKEN" > /tmp/cloudflared-token
           chmod 600 /tmp/cloudflared-token
-
           nohup cloudflared tunnel run \
             --token-file /tmp/cloudflared-token \
             > /tmp/cloudflared.log 2>&1 &
           echo $! > /tmp/cloudflared.pid
-
           sleep 5
           cat /tmp/cloudflared.log || true
 
