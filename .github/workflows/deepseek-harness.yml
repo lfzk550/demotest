@@ -11,12 +11,16 @@ permissions:
 # Required repository secrets:
 #   GROK_API_KEY              primary key for https://api.picpi.top/v1
 #   OPENROUTER_API_KEY        fallback key for OpenRouter
+#   AGNES_API_KEY             fallback key for https://apihub.agnes-ai.com/v1
 #   CLOUDFLARE_TUNNEL_TOKEN   Cloudflare tunnel token
 env:
   GROK_BASE_URL: https://api.picpi.top/v1
   GROK_MODEL: grok-4.6
   OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
   OPENROUTER_MODEL: 'nvidia/nemotron-3-ultra-550b-a55b:free'
+  OPENROUTER_MINIMAX_MODEL: 'minimax/minimax-m3:free'
+  AGNES_BASE_URL: https://apihub.agnes-ai.com/v1
+  AGNES_MODEL: agnes-2.5-flash
   CLOUDFLARE_HOSTNAME: dsh.ap2.ccwu.cc
   NODE_VERSION: '24.11.1'
   PNPM_VERSION: '10.26.0'
@@ -86,27 +90,34 @@ jobs:
       - name: Prepare content directory
         run: mkdir -p content
 
-      - name: Configure Grok primary and OpenRouter fallback
+      - name: Configure Grok primary, OpenRouter fallback, and Agnes fallback
         env:
           GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          AGNES_API_KEY: ${{ secrets.AGNES_API_KEY }}
         run: |
           set -euo pipefail
           bash .github/scripts/configure-dsh-providers.sh grok
 
-      - name: Verify DSH configuration
+      - name: Verify DSH configuration and provider keys
         env:
           GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          AGNES_API_KEY: ${{ secrets.AGNES_API_KEY }}
         run: |
           set -euo pipefail
+          test -n "${GROK_API_KEY:-}"
+          test -n "${OPENROUTER_API_KEY:-}"
+          test -n "${AGNES_API_KEY:-}"
           dsh --profile web --dump-config > /tmp/dsh-config.txt
-          grep -n -E 'grok|openrouter|GROK_API_KEY|OPENROUTER_API_KEY|grok-4.6|nemotron-3-ultra-550b-a55b|api.picpi.top' /tmp/dsh-config.txt || true
+          grep -n -E 'grok|openrouter|agnes|GROK_API_KEY|OPENROUTER_API_KEY|AGNES_API_KEY|grok-4.6|nemotron-3-ultra-550b-a55b|minimax-m3|agnes-2.5-flash|api.picpi.top|apihub.agnes-ai.com' /tmp/dsh-config.txt || true
+          echo "Provider key presence: Grok=configured OpenRouter=configured Agnes=configured"
 
       - name: Start DeepSeek Harness web profile
         env:
           GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          AGNES_API_KEY: ${{ secrets.AGNES_API_KEY }}
         run: |
           set -euo pipefail
           nohup dsh --profile web --host 127.0.0.1 --port 3080 --trusted-host dsh.ap2.ccwu.cc --no-open > /tmp/dsh.log 2>&1 &
@@ -239,7 +250,11 @@ jobs:
           echo "Primary model: ${GROK_MODEL}"
           echo "Primary API: ${GROK_BASE_URL}"
           echo "Fallback provider: openrouter"
-          echo "Fallback model: ${OPENROUTER_MODEL}"
+          echo "OpenRouter model: ${OPENROUTER_MODEL}"
+          echo "OpenRouter MiniMax model: ${OPENROUTER_MINIMAX_MODEL}"
+          echo "Fallback provider 2: agnes"
+          echo "Agnes model: ${AGNES_MODEL}"
+          echo "Agnes API: ${AGNES_BASE_URL}"
           echo "Blog content directory: ${GITHUB_WORKSPACE}/content"
           echo "Node: $(node --version)"
           echo "pnpm: $(pnpm --version)"
