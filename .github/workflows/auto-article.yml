@@ -82,6 +82,7 @@ jobs:
           4. Filename must be lowercase kebab-case markdown.
           5. Include source links.
           6. Do not modify workflow files.
+          7. Do not run git commit, git push, or any other Git write operation. The workflow will handle Git publishing after generation.
           EOF
 
           if dsh --profile headless "$(cat /tmp/article-task.txt)"; then
@@ -103,7 +104,7 @@ jobs:
           fi
           ls -lh content/
 
-      - name: Commit article
+      - name: Commit and push article
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -111,6 +112,16 @@ jobs:
           git config user.name "Article Publishing Bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
           git add content/
-          git commit -m "Publish automated article" || exit 0
+
+          if git diff --cached --quiet; then
+            echo "No new article changes to commit."
+          else
+            git commit -m "Publish automated article"
+          fi
+
+          # Always push. Do not use 'git commit ... || exit 0', because that
+          # would terminate the shell before the push when there is no staged
+          # change (for example, if an agent already created a local commit).
           git push origin HEAD:main
