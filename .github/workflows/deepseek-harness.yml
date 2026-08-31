@@ -28,7 +28,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22.19.0
+          node-version: 24.11.1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -41,6 +41,7 @@ jobs:
 
       - name: Verify dsh and pnpm
         run: |
+          node --version
           dsh --version
           pnpm --version
 
