@@ -118,7 +118,7 @@ jobs:
             sleep 5
           done
 
-      - name: Start dsh-full-remote proxy
+      - name: Start dsh-full-remote proxy without access token
         run: |
           set -euxo pipefail
           curl -fsS \
@@ -129,11 +129,16 @@ jobs:
             http://127.0.0.1:3080/dsh-reverse-proxy/listen \
             --data '{"host":"127.0.0.1","port":3081}'
 
+          # dsh-full-remote's reverse-proxy endpoint is intentionally exposed
+          # without its application-layer access token. Authentication should
+          # be provided by Cloudflare Access at the public hostname.
           curl -fsS \
             -X POST \
             -H 'Origin: http://127.0.0.1:3080' \
             -H 'x-dsh-reverse-proxy-control: 1' \
-            http://127.0.0.1:3080/dsh-reverse-proxy/start
+            -H 'Content-Type: application/json' \
+            http://127.0.0.1:3080/dsh-reverse-proxy/start \
+            --data '{"auth":false}'
 
           for i in {1..30}; do
             if curl -fsS http://127.0.0.1:3081/_dsh_reverse_proxy/healthz >/dev/null 2>&1; then
@@ -190,7 +195,6 @@ jobs:
           echo "Checking public endpoint: ${url}"
           echo "Expected origin: http://127.0.0.1:3081"
 
-          # First prove the local origin is still alive.
           if ! curl -fsS --connect-timeout 5 --max-time 10 \
             http://127.0.0.1:3081/_dsh_reverse_proxy/healthz \
             -o /tmp/local-healthz; then
@@ -201,8 +205,6 @@ jobs:
           echo "Local proxy healthz: OK"
           cat /tmp/local-healthz || true
 
-          # A connector process can start successfully while the hostname is
-          # still misconfigured in Cloudflare. Verify the actual public path.
           last_status=""
           last_error=""
           for i in {1..30}; do
