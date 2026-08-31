@@ -122,8 +122,8 @@ jobs:
           echo "Run ID: ${{ github.run_id }}"
           echo "=============================================="
 
-      - name: Keep alive for 6 hours
-        run: sleep 6h
+      - name: Keep alive for 5 hours
+        run: sleep 5h
 
       - name: Commit Markdown created by Harness
         run: |
