@@ -5,6 +5,8 @@
 #
 # Usage:
 #   configure-dsh-providers.sh [grok|openrouter|agnes]
+# The optional argument forces the default provider. Otherwise Grok is preferred,
+# then OpenRouter, then Agnes when the corresponding key is available.
 set -euo pipefail
 
 DSH_HOME="${DSH_HOME:-${HOME}/.dsh}"
@@ -39,12 +41,11 @@ if [ "$REQUESTED_DEFAULT" = "openrouter" ]; then
   DEFAULT_PROVIDER="openrouter"
   DEFAULT_MODEL="$OPENROUTER_MODEL"
 elif [ "$REQUESTED_DEFAULT" = "agnes" ]; then
-  if [ "$has_agnes" -ne 1 ]; then
-    echo "Requested Agnes default but AGNES_API_KEY is not set" >&2
-    exit 1
-  fi
   DEFAULT_PROVIDER="agnes"
   DEFAULT_MODEL="$AGNES_MODEL"
+  if [ "$has_agnes" -ne 1 ]; then
+    echo "WARNING: AGNES_API_KEY is not set; Agnes will be visible in DSH but requests will fail until the key is configured." >&2
+  fi
 elif [ "$REQUESTED_DEFAULT" = "grok" ]; then
   if [ "$has_grok" -ne 1 ]; then
     echo "Requested Grok default but GROK_API_KEY is not set" >&2
@@ -89,17 +90,19 @@ EOF
         - id: '${OPENROUTER_MINIMAX_MODEL}'
 EOF
   fi
-  if [ "$has_agnes" -eq 1 ]; then
-    cat <<EOF
+
+  # Always register Agnes so the model is present in the DSH model picker.
+  # The API key remains an environment-variable reference and is never stored here.
+  cat <<EOF
     agnes:
-      displayName: Agnes (fallback)
+      displayName: Agnes
       api: openai-completions
       baseURL: ${AGNES_BASE_URL}
       apiKeyEnv: AGNES_API_KEY
       models:
         - id: '${AGNES_MODEL}'
 EOF
-  fi
+
   cat <<EOF
 agent-default-model:
   provider: ${DEFAULT_PROVIDER}
@@ -122,8 +125,8 @@ chmod 600 "$DSH_HOME/.env" "$DSH_HOME/settings.yaml"
 
 echo "DSH home: $DSH_HOME"
 echo "Primary API: ${GROK_BASE_URL} (model ${GROK_MODEL})"
-echo "OpenRouter fallback API: ${OPENROUTER_BASE_URL} (models ${OPENROUTER_MODEL}, ${OPENROUTER_MINIMAX_MODEL})"
-echo "Agnes fallback API: ${AGNES_BASE_URL} (model ${AGNES_MODEL})"
+echo "OpenRouter fallback: ${OPENROUTER_BASE_URL} (models ${OPENROUTER_MODEL}, ${OPENROUTER_MINIMAX_MODEL})"
+echo "Agnes fallback: ${AGNES_BASE_URL} (model ${AGNES_MODEL})"
 echo "Default provider: ${DEFAULT_PROVIDER}"
 echo "Default model: ${DEFAULT_MODEL}"
 echo "GROK_API_KEY: $([ "$has_grok" -eq 1 ] && echo configured || echo missing)"
