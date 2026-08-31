@@ -31,14 +31,9 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-
           curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
           sudo apt-get install -y nodejs
-
-          # NodeSource installs the system Node directly. Do not create a
-          # self-referencing symlink when /usr/local/bin is already first in PATH.
           hash -r
-
           node --version
           npm --version
           command -v node
@@ -48,12 +43,10 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-
           npm install --global "pnpm@${PNPM_VERSION}"
           hash -r
-
           pnpm --version
-          pnpm exec node --version
+          pnpm node --version
           node --version
           command -v pnpm
           pnpm config get node-linker || true
@@ -68,7 +61,7 @@ jobs:
           echo "pnpm=$(command -v pnpm)"
           node --version
           npm exec -- node --version
-          pnpm exec node --version
+          pnpm node --version
 
       - name: Install DeepSeek Harness
         run: npm install -g @deepseek-ai/dsh
@@ -78,7 +71,7 @@ jobs:
           node --version
           dsh --version
           pnpm --version
-          pnpm exec node --version
+          pnpm node --version
 
       - name: Install dsh-full-remote
         run: |
@@ -89,9 +82,8 @@ jobs:
             dsh-full-remote: true
           EOF
 
-          # Explicitly prove the lifecycle environment is using Node 24.
           node --version
-          pnpm exec node --version
+          pnpm node --version
 
           dsh plugin --profile web add github:JUANWANG-BUAA/dsh-full-remote
           dsh plugin --profile web list
@@ -121,13 +113,11 @@ jobs:
               echo "DeepSeek Harness is ready"
               exit 0
             fi
-
             if [ "$i" -eq 60 ]; then
               echo "DeepSeek Harness failed to start"
               cat /tmp/dsh.log || true
               exit 1
             fi
-
             sleep 5
           done
 
@@ -152,7 +142,6 @@ jobs:
               echo "dsh-full-remote proxy is ready on 127.0.0.1:3081"
               exit 0
             fi
-
             sleep 2
           done
 
@@ -208,12 +197,10 @@ jobs:
       - name: Commit Markdown created by Harness
         run: |
           git add content/
-
           if git diff --cached --quiet; then
             echo "No new blog content to commit."
             exit 0
           fi
-
           git commit -m "Publish blog posts from DeepSeek Harness"
           git push origin HEAD:main
 
