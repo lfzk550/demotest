@@ -80,6 +80,44 @@ jobs:
       - name: Prepare content directory
         run: mkdir -p content
 
+      - name: Configure DSH OpenRouter provider
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          set -euxo pipefail
+          test -n "$OPENROUTER_API_KEY"
+
+          DSH_HOME="${HOME}/.dsh"
+          mkdir -p "$DSH_HOME"
+
+          cat > "$DSH_HOME/settings.yaml" <<EOF
+          llm-pi-ai:
+            providers:
+              openrouter:
+                api: openai-completions
+                baseURL: ${OPENROUTER_BASE_URL}
+                apiKeyEnv: OPENROUTER_API_KEY
+                models:
+                  - id: '${OPENROUTER_MODEL}'
+          agent-default-model:
+            provider: openrouter
+            model: '${OPENROUTER_MODEL}'
+          EOF
+
+          printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY" > "$DSH_HOME/.env"
+          chmod 600 "$DSH_HOME/.env" "$DSH_HOME/settings.yaml"
+
+          echo "===== DSH settings.yaml ====="
+          cat "$DSH_HOME/settings.yaml"
+          echo "===== OpenRouter credential ====="
+          echo "OPENROUTER_API_KEY is configured (value hidden)"
+
+      - name: Verify DSH configuration
+        run: |
+          set -euxo pipefail
+          dsh --profile web --dump-config > /tmp/dsh-config.txt
+          grep -n -E 'openrouter|OPENROUTER_API_KEY|nemotron-3-ultra-550b-a55b' /tmp/dsh-config.txt || true
+
       - name: Start DeepSeek Harness web profile
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -211,8 +249,8 @@ jobs:
           echo "Cloudflare hostname: https://${CLOUDFLARE_HOSTNAME}/"
           echo "Tunnel target: http://127.0.0.1:3080"
           echo "DSH trusted host: ${CLOUDFLARE_HOSTNAME}"
-          echo "Model: ${OPENROUTER_MODEL}"
-          echo "Provider: OpenRouter"
+          echo "OpenRouter provider: openrouter"
+          echo "OpenRouter model: ${OPENROUTER_MODEL}"
           echo "Blog content directory: ${GITHUB_WORKSPACE}/content"
           echo "Node: $(node --version)"
           echo "pnpm: $(pnpm --version)"
