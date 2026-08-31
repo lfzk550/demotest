@@ -14,6 +14,7 @@ env:
   CLOUDFLARE_HOSTNAME: dsh.ap2.ccwu.cc
   NODE_VERSION: '24.11.1'
   PNPM_VERSION: '10.26.0'
+  DSH_HOME: /home/runner/.dsh/profiles/web
 
 jobs:
   deepseek-harness:
@@ -73,8 +74,8 @@ jobs:
       - name: Install dsh-full-remote
         run: |
           set -euxo pipefail
-          mkdir -p /home/runner/.dsh/profiles/web
-          cat > /home/runner/.dsh/profiles/web/pnpm-workspace.yaml <<'EOF'
+          mkdir -p "$DSH_HOME"
+          cat > "$DSH_HOME/pnpm-workspace.yaml" <<'EOF'
           allowBuilds:
             dsh-full-remote: true
           EOF
@@ -84,6 +85,36 @@ jobs:
 
           dsh plugin --profile web add github:JUANWANG-BUAA/dsh-full-remote
           dsh plugin --profile web list
+
+      - name: Configure persistent dsh-full-remote access token
+        env:
+          DSH_REMOTE_TOKEN: ${{ secrets.DSH_REMOTE_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$DSH_REMOTE_TOKEN"
+          test "${#DSH_REMOTE_TOKEN}" -ge 24
+          mkdir -p "$DSH_HOME"
+          umask 077
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          token = os.environ["DSH_REMOTE_TOKEN"]
+          state = {
+              "enabled": True,
+              "accessToken": token,
+              "listenHost": "127.0.0.1",
+              "listenPort": 3081,
+              "sessions": [],
+          }
+          path = Path(os.environ["DSH_HOME"]) / "reverse-proxy.json"
+          path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+          os.chmod(path, 0o600)
+          print(f"Created persistent dsh-full-remote state at {path}")
+          print("Access token configured from GitHub Actions secret DSH_REMOTE_TOKEN")
+          PY
 
       - name: Configure Git for Harness commits
         env:
@@ -100,7 +131,7 @@ jobs:
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          nohup dsh --profile web --host 127.0.0.1 --port 3080 --no-open > /tmp/dsh.log 2>&1 &
+          nohup env DSH_HOME="$DSH_HOME" dsh --profile web --host 127.0.0.1 --port 3080 --no-open > /tmp/dsh.log 2>&1 &
           echo $! > /tmp/dsh.pid
 
       - name: Wait for DeepSeek Harness
@@ -118,7 +149,7 @@ jobs:
             sleep 5
           done
 
-      - name: Start dsh-full-remote proxy without access token
+      - name: Start dsh-full-remote proxy with persistent token
         run: |
           set -euxo pipefail
           curl -fsS \
@@ -129,16 +160,13 @@ jobs:
             http://127.0.0.1:3080/dsh-reverse-proxy/listen \
             --data '{"host":"127.0.0.1","port":3081}'
 
-          # dsh-full-remote's reverse-proxy endpoint is intentionally exposed
-          # without its application-layer access token. Authentication should
-          # be provided by Cloudflare Access at the public hostname.
+          # Authentication is provided by dsh-full-remote itself.
+          # The standing access token was pre-seeded in reverse-proxy.json.
           curl -fsS \
             -X POST \
             -H 'Origin: http://127.0.0.1:3080' \
             -H 'x-dsh-reverse-proxy-control: 1' \
-            -H 'Content-Type: application/json' \
-            http://127.0.0.1:3080/dsh-reverse-proxy/start \
-            --data '{"auth":false}'
+            http://127.0.0.1:3080/dsh-reverse-proxy/start
 
           for i in {1..30}; do
             if curl -fsS http://127.0.0.1:3081/_dsh_reverse_proxy/healthz >/dev/null 2>&1; then
