@@ -14,8 +14,6 @@ env:
   CLOUDFLARE_HOSTNAME: dsh.ap2.ccwu.cc
   NODE_VERSION: '24.11.1'
   PNPM_VERSION: '10.26.0'
-  DSH_ROOT: /home/runner/.dsh
-  DSH_PROFILE_HOME: /home/runner/.dsh/profiles/web
 
 jobs:
   deepseek-harness:
@@ -28,14 +26,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Restore dsh-full-remote state
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ env.DSH_PROFILE_HOME }}
-          key: dsh-full-remote-state-${{ runner.os }}-${{ github.repository }}-${{ github.run_id }}
-          restore-keys: |
-            dsh-full-remote-state-${{ runner.os }}-${{ github.repository }}-
 
       - name: Install Node.js 24 system-wide
         shell: bash
@@ -58,7 +48,6 @@ jobs:
           pnpm --version
           node --version
           command -v pnpm
-          pnpm config get node-linker || true
 
       - name: Verify Node runtime
         shell: bash
@@ -80,26 +69,6 @@ jobs:
           dsh --version
           pnpm --version
 
-      - name: Configure dsh profile pnpm build policy
-        shell: bash
-        run: |
-          set -euxo pipefail
-          mkdir -p "$DSH_PROFILE_HOME"
-          cat > "$DSH_PROFILE_HOME/pnpm-workspace.yaml" <<'EOF'
-          allowBuilds:
-            dsh-full-remote: true
-          EOF
-          echo "Created $DSH_PROFILE_HOME/pnpm-workspace.yaml"
-          cat "$DSH_PROFILE_HOME/pnpm-workspace.yaml"
-
-      - name: Install dsh-full-remote
-        run: |
-          set -euxo pipefail
-          node --version
-          pnpm --version
-          dsh plugin --profile web add github:JUANWANG-BUAA/dsh-full-remote
-          dsh plugin --profile web list
-
       - name: Configure Git for Harness commits
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -115,58 +84,32 @@ jobs:
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
+          set -euxo pipefail
           nohup dsh --profile web --host 127.0.0.1 --port 3080 --no-open > /tmp/dsh.log 2>&1 &
           echo $! > /tmp/dsh.pid
 
       - name: Wait for DeepSeek Harness
+        shell: bash
         run: |
+          set -u
           for i in {1..60}; do
-            if curl -fsS http://127.0.0.1:3080/ >/dev/null 2>&1; then
-              echo "DeepSeek Harness is ready"
+            if curl -fsS --connect-timeout 3 --max-time 5 http://127.0.0.1:3080/ >/dev/null 2>&1; then
+              echo "DeepSeek Harness is ready on 127.0.0.1:3080"
               exit 0
             fi
-            if [ "$i" -eq 60 ]; then
-              echo "DeepSeek Harness failed to start"
+            if ! kill -0 "$(cat /tmp/dsh.pid)" 2>/dev/null; then
+              echo "DeepSeek Harness process exited"
               cat /tmp/dsh.log || true
               exit 1
             fi
             sleep 5
           done
-
-      - name: Start dsh-full-remote proxy with plugin-managed token
-        run: |
-          set -euxo pipefail
-          curl -fsS \
-            -X POST \
-            -H 'Origin: http://127.0.0.1:3080' \
-            -H 'x-dsh-reverse-proxy-control: 1' \
-            -H 'Content-Type: application/json' \
-            http://127.0.0.1:3080/dsh-reverse-proxy/listen \
-            --data '{"host":"127.0.0.1","port":3081}'
-
-          curl -fsS \
-            -X POST \
-            -H 'Origin: http://127.0.0.1:3080' \
-            -H 'x-dsh-reverse-proxy-control: 1' \
-            http://127.0.0.1:3080/dsh-reverse-proxy/start
-
-          for i in {1..30}; do
-            if curl -fsS http://127.0.0.1:3081/_dsh_reverse_proxy/healthz >/dev/null 2>&1; then
-              echo "dsh-full-remote proxy is ready on 127.0.0.1:3081"
-              exit 0
-            fi
-            sleep 2
-          done
-
-          echo "dsh-full-remote proxy failed to start"
-          curl -fsS \
-            -H 'Origin: http://127.0.0.1:3080' \
-            -H 'x-dsh-reverse-proxy-control: 1' \
-            http://127.0.0.1:3080/dsh-reverse-proxy/status || true
+          echo "DeepSeek Harness failed to become ready"
           cat /tmp/dsh.log || true
           exit 1
 
       - name: Install cloudflared
+        shell: bash
         run: |
           set -euxo pipefail
           curl -fsSL --retry 5 --retry-delay 2 \
@@ -183,6 +126,7 @@ jobs:
           test -n "$CLOUDFLARE_TUNNEL_TOKEN"
           printf '%s' "$CLOUDFLARE_TUNNEL_TOKEN" > /tmp/cloudflared-token
           chmod 600 /tmp/cloudflared-token
+
           nohup cloudflared tunnel run \
             --token-file /tmp/cloudflared-token \
             > /tmp/cloudflared.log 2>&1 &
@@ -203,17 +147,16 @@ jobs:
           set -u
           url="https://${CLOUDFLARE_HOSTNAME}/"
           echo "Checking public endpoint: ${url}"
-          echo "Expected origin: http://127.0.0.1:3081"
+          echo "Expected origin: http://127.0.0.1:3080"
 
           if ! curl -fsS --connect-timeout 5 --max-time 10 \
-            http://127.0.0.1:3081/_dsh_reverse_proxy/healthz \
-            -o /tmp/local-healthz; then
-            echo "Local dsh-full-remote health check failed"
+            http://127.0.0.1:3080/ \
+            -o /tmp/local-dsh-response; then
+            echo "Local DeepSeek Harness health check failed"
             cat /tmp/dsh.log || true
             exit 1
           fi
-          echo "Local proxy healthz: OK"
-          cat /tmp/local-healthz || true
+          echo "Local DSH endpoint: OK"
 
           last_status=""
           last_error=""
@@ -224,7 +167,7 @@ jobs:
               exit 1
             fi
 
-            rm -f /tmp/public-response
+            rm -f /tmp/public-response /tmp/public-curl-error
             status="$(curl -sS -L \
               --connect-timeout 10 \
               --max-time 20 \
@@ -265,25 +208,18 @@ jobs:
           echo "=============================================="
           echo "DeepSeek Harness is running"
           echo "Cloudflare hostname: https://${CLOUDFLARE_HOSTNAME}/"
-          echo "Tunnel target: http://127.0.0.1:3081"
+          echo "Tunnel target: http://127.0.0.1:3080"
           echo "Model: ${OPENROUTER_MODEL}"
           echo "Provider: OpenRouter"
           echo "Blog content directory: ${GITHUB_WORKSPACE}/content"
           echo "Node: $(node --version)"
           echo "pnpm: $(pnpm --version)"
           echo "Run ID: ${{ github.run_id }}"
-          echo "Reverse proxy token: generated and managed by dsh-full-remote"
+          echo "Authentication: handled by Cloudflare Access (if configured)"
           echo "=============================================="
 
       - name: Keep alive for 5 hours
         run: sleep 5h
-
-      - name: Save dsh-full-remote state
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ env.DSH_PROFILE_HOME }}
-          key: dsh-full-remote-state-${{ runner.os }}-${{ github.repository }}-${{ github.run_id }}
 
       - name: Commit Markdown created by Harness
         run: |
