@@ -8,7 +8,13 @@ on:
 permissions:
   contents: write
 
+# Required repository secrets:
+#   GROK_API_KEY              primary key for https://api.picpi.top/v1
+#   OPENROUTER_API_KEY        fallback key for OpenRouter
+#   CLOUDFLARE_TUNNEL_TOKEN   Cloudflare tunnel token
 env:
+  GROK_BASE_URL: https://api.picpi.top/v1
+  GROK_MODEL: grok-4.6
   OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
   OPENROUTER_MODEL: 'nvidia/nemotron-3-ultra-550b-a55b:free'
   CLOUDFLARE_HOSTNAME: dsh.ap2.ccwu.cc
@@ -80,49 +86,29 @@ jobs:
       - name: Prepare content directory
         run: mkdir -p content
 
-      - name: Configure DSH OpenRouter provider
+      - name: Configure Grok primary and OpenRouter fallback
         env:
+          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          set -euxo pipefail
-          test -n "$OPENROUTER_API_KEY"
-
-          DSH_HOME="${HOME}/.dsh"
-          mkdir -p "$DSH_HOME"
-
-          cat > "$DSH_HOME/settings.yaml" <<EOF
-          llm-pi-ai:
-            providers:
-              openrouter:
-                api: openai-completions
-                baseURL: ${OPENROUTER_BASE_URL}
-                apiKeyEnv: OPENROUTER_API_KEY
-                models:
-                  - id: '${OPENROUTER_MODEL}'
-          agent-default-model:
-            provider: openrouter
-            model: '${OPENROUTER_MODEL}'
-          EOF
-
-          printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY" > "$DSH_HOME/.env"
-          chmod 600 "$DSH_HOME/.env" "$DSH_HOME/settings.yaml"
-
-          echo "===== DSH settings.yaml ====="
-          cat "$DSH_HOME/settings.yaml"
-          echo "===== OpenRouter credential ====="
-          echo "OPENROUTER_API_KEY is configured (value hidden)"
+          set -euo pipefail
+          bash .github/scripts/configure-dsh-providers.sh grok
 
       - name: Verify DSH configuration
+        env:
+          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           dsh --profile web --dump-config > /tmp/dsh-config.txt
-          grep -n -E 'openrouter|OPENROUTER_API_KEY|nemotron-3-ultra-550b-a55b' /tmp/dsh-config.txt || true
+          grep -n -E 'grok|openrouter|GROK_API_KEY|OPENROUTER_API_KEY|grok-4.6|nemotron-3-ultra-550b-a55b|api.picpi.top' /tmp/dsh-config.txt || true
 
       - name: Start DeepSeek Harness web profile
         env:
+          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           nohup dsh --profile web --host 127.0.0.1 --port 3080 --trusted-host dsh.ap2.ccwu.cc --no-open > /tmp/dsh.log 2>&1 &
           echo $! > /tmp/dsh.pid
 
@@ -249,8 +235,11 @@ jobs:
           echo "Cloudflare hostname: https://${CLOUDFLARE_HOSTNAME}/"
           echo "Tunnel target: http://127.0.0.1:3080"
           echo "DSH trusted host: ${CLOUDFLARE_HOSTNAME}"
-          echo "OpenRouter provider: openrouter"
-          echo "OpenRouter model: ${OPENROUTER_MODEL}"
+          echo "Primary provider: grok"
+          echo "Primary model: ${GROK_MODEL}"
+          echo "Primary API: ${GROK_BASE_URL}"
+          echo "Fallback provider: openrouter"
+          echo "Fallback model: ${OPENROUTER_MODEL}"
           echo "Blog content directory: ${GITHUB_WORKSPACE}/content"
           echo "Node: $(node --version)"
           echo "pnpm: $(pnpm --version)"

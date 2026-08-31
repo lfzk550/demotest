@@ -8,6 +8,11 @@ on:
 permissions:
   contents: write
 
+# Required repository secrets:
+#   GROK_API_KEY          primary key for https://api.picpi.top/v1
+#   OPENROUTER_API_KEY    fallback key for OpenRouter
+# Required repository variable:
+#   ARTICLE_PROMPT
 env:
   GROK_BASE_URL: https://api.picpi.top/v1
   GROK_MODEL: grok-4.6
@@ -53,32 +58,7 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           set -euo pipefail
-          test -n "$GROK_API_KEY"
-          test -n "$OPENROUTER_API_KEY"
-          mkdir -p "$HOME/.dsh"
-
-          cat > "$HOME/.dsh/settings.yaml" <<EOF
-          llm-pi-ai:
-            providers:
-              grok:
-                api: openai-completions
-                baseURL: ${GROK_BASE_URL}
-                apiKeyEnv: GROK_API_KEY
-                models:
-                  - id: '${GROK_MODEL}'
-              openrouter:
-                api: openai-completions
-                baseURL: ${OPENROUTER_BASE_URL}
-                apiKeyEnv: OPENROUTER_API_KEY
-                models:
-                  - id: '${OPENROUTER_MODEL}'
-          agent-default-model:
-            provider: grok
-            model: '${GROK_MODEL}'
-          EOF
-
-          printf 'GROK_API_KEY=%s\nOPENROUTER_API_KEY=%s\n' "$GROK_API_KEY" "$OPENROUTER_API_KEY" > "$HOME/.dsh/.env"
-          chmod 600 "$HOME/.dsh/.env" "$HOME/.dsh/settings.yaml"
+          bash .github/scripts/configure-dsh-providers.sh grok
 
       - name: Generate article with Grok fallback
         env:
@@ -104,10 +84,11 @@ jobs:
           6. Do not modify workflow files.
           EOF
 
-          if ! dsh --profile headless "$(cat /tmp/article-task.txt)"; then
-            echo "Grok failed, retrying with OpenRouter fallback"
-            sed -i "s/provider: grok/provider: openrouter/" "$HOME/.dsh/settings.yaml"
-            sed -i "s/model: '${GROK_MODEL}'/model: '${OPENROUTER_MODEL}'/" "$HOME/.dsh/settings.yaml"
+          if dsh --profile headless "$(cat /tmp/article-task.txt)"; then
+            echo "Article generated with Grok primary model (${GROK_MODEL})"
+          else
+            echo "Grok failed, retrying with OpenRouter fallback (${OPENROUTER_MODEL})"
+            bash .github/scripts/configure-dsh-providers.sh openrouter
             dsh --profile headless "$(cat /tmp/article-task.txt)"
           fi
 
