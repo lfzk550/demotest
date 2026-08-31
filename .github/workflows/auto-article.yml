@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 env:
-  GROK_BASE_URL: https://api.picpi.top
+  GROK_BASE_URL: https://api.picpi.top/v1
   GROK_MODEL: grok-4.6
   OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
   OPENROUTER_MODEL: 'nvidia/nemotron-3-ultra-550b-a55b:free'
@@ -77,7 +77,7 @@ jobs:
             model: '${GROK_MODEL}'
           EOF
 
-          printf 'GROK_API_KEY=%s\nOPENROUTER_API_KEY=%s\n' "$GROK_API_KEY" "$OPENROUTER_API_KEY" > "$HOME/.dsh/.env"
+          printf 'GROK_API_KEY=%s\nOPENROUTER_API_KEY=%s\n' "$GROK_API_KEY" "$OPENROUTER_API_KEY" > "$HOME/.dSH/.env"
           chmod 600 "$HOME/.dsh/.env" "$HOME/.dsh/settings.yaml"
 
       - name: Generate article with Grok fallback
