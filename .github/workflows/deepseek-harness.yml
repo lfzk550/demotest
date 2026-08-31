@@ -168,7 +168,13 @@ jobs:
             fi
 
             rm -f /tmp/public-response /tmp/public-curl-error
-            status="$(curl -sS -L \
+
+            # Do not follow redirects. Cloudflare Access commonly returns a
+            # redirect to its login flow when the request is unauthenticated.
+            # A 2xx, 3xx, 401 or 403 proves that the public edge is reachable;
+            # following the login redirect can turn a healthy Tunnel into a
+            # false timeout in this non-interactive CI check.
+            status="$(curl -sS \
               --connect-timeout 10 \
               --max-time 20 \
               -o /tmp/public-response \
@@ -185,8 +191,9 @@ jobs:
             fi
 
             case "$status" in
-              2??|3??)
-                echo "Public HTTPS endpoint is reachable: ${url}"
+              2??|3??|401|403)
+                echo "Cloudflare public endpoint is reachable: ${url}"
+                echo "HTTP ${status} is acceptable for this connectivity check."
                 exit 0
                 ;;
             esac
