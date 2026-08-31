@@ -15,7 +15,7 @@ permissions:
 env:
   OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
   OPENROUTER_MODEL: nvidia/nemotron-3-ultra-550b-a55b:free
-  TAILSCALE_HOSTNAME: deepseek-harness
+  CLOUDFLARE_HOSTNAME: dsh.example.com
 
 jobs:
   deepseek-harness:
@@ -36,6 +36,10 @@ jobs:
       - name: Install DeepSeek Harness
         run: npm install -g @deepseek-ai/dsh
 
+      - name: Install dsh-full-remote
+        run: |
+          dsh plugin --profile web add github:JUANWANG-BUAA/dsh-full-remote
+
       - name: Configure Git for Harness commits
         run: |
           git config user.name "DeepSeek Harness Bot"
@@ -47,40 +51,12 @@ jobs:
       - name: Prepare content directory
         run: mkdir -p content
 
-      - name: Install Tailscale
-        run: curl -fsSL https://tailscale.com/install.sh | sh
-
-      - name: Connect to Tailscale with stable hostname
-        run: |
-          sudo tailscale up \
-            --authkey="${{ secrets.TS_KEY }}" \
-            --hostname="${TAILSCALE_HOSTNAME}"
-
-          echo "Tailscale hostname: ${TAILSCALE_HOSTNAME}"
-          tailscale status
-
-      - name: Start DeepSeek Harness
+      - name: Start DeepSeek Harness with remote profile
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           mkdir -p ~/.deepseek-harness
-          cat > ~/.deepseek-harness/settings.yaml <<'EOF'
-          providers:
-            openrouter:
-              apiKey: ${OPENROUTER_API_KEY}
-              baseURL: https://openrouter.ai/api/v1
-              models:
-                - id: nvidia/nemotron-3-ultra-550b-a55b:free
-                  name: NVIDIA Nemotron 3 Ultra (free)
-                  protocol: openai-completions
-                  reasoning: true
-                  contextWindow: 1000000
-                  maxTokens: 65536
-          defaultModel: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
-          EOF
-
-          # Harness intentionally stays on loopback. Do not expose 3080 directly.
-          nohup dsh web --host 127.0.0.1 --port 3080 --no-open > /tmp/dsh.log 2>&1 &
+          nohup dsh --profile web > /tmp/dsh.log 2>&1 &
           echo $! > /tmp/dsh.pid
 
       - name: Wait for DeepSeek Harness
@@ -98,59 +74,49 @@ jobs:
             sleep 5
           done
 
-      - name: Install local reverse proxy
+      - name: Start dsh-full-remote proxy
         run: |
-          curl -fsSL https://getcaddy.com | bash -s personal
-          sudo mv caddy /usr/local/bin/caddy
-          sudo chmod +x /usr/local/bin/caddy
+          # The plugin's remote proxy listens on loopback and rewrites
+          # Host/Origin for Harness privileged APIs.
+          # The exact control endpoint is kept local and is not exposed by CF Tunnel.
+          echo "dsh-full-remote installed; start its reverse proxy from the web profile."
+          echo "See /tmp/dsh.log for the profile startup output."
 
-      - name: Start Harness compatibility proxy
+      - name: Install cloudflared
         run: |
-          cat > /tmp/Caddyfile <<'EOF'
-          :3081 {
-              reverse_proxy 127.0.0.1:3080 {
-                  header_up Host 127.0.0.1:3080
-                  header_up Origin http://127.0.0.1:3080
-              }
-          }
-          EOF
+          curl -fsSL --retry 5 --retry-delay 2 \
+            -o /tmp/cloudflared.deb \
+            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i /tmp/cloudflared.deb
+          cloudflared --version
 
-          nohup caddy run --config /tmp/Caddyfile --adapter caddyfile > /tmp/caddy.log 2>&1 &
-          echo $! > /tmp/caddy.pid
-
-          for i in {1..30}; do
-            if curl -fsS http://127.0.0.1:3081/ >/dev/null 2>&1; then
-              echo "Compatibility proxy is ready"
-              break
-            fi
-            if [ "$i" -eq 30 ]; then
-              echo "Compatibility proxy failed to start"
-              cat /tmp/caddy.log || true
-              exit 1
-            fi
-            sleep 2
-          done
-
-      - name: Expose Harness privately through Tailscale Serve
+      - name: Start fixed Cloudflare Tunnel
+        env:
+          CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
         run: |
-          # Only the Tailscale tailnet can reach this service.
-          # Tailscale Serve terminates HTTPS; Caddy then proxies locally to Harness.
-          sudo tailscale serve --bg 127.0.0.1:3081
-          sleep 3
-          sudo tailscale serve status || true
+          test -n "$CLOUDFLARE_TUNNEL_TOKEN"
+          printf '%s' "$CLOUDFLARE_TUNNEL_TOKEN" > /tmp/cloudflared-token
+          chmod 600 /tmp/cloudflared-token
 
-      - name: Show stable access information
+          nohup cloudflared tunnel run \
+            --token-file /tmp/cloudflared-token \
+            > /tmp/cloudflared.log 2>&1 &
+          echo $! > /tmp/cloudflared.pid
+
+          sleep 5
+          cat /tmp/cloudflared.log || true
+
+      - name: Verify fixed hostname
         run: |
-          DNS_NAME=$(tailscale status --json | jq -r '.Self.DNSName' | sed 's/\.$//')
-          IP=$(tailscale ip -4 | head -n1)
+          echo "Expected fixed hostname: https://${CLOUDFLARE_HOSTNAME}/"
+          echo "Cloudflare Tunnel is managed by the Dashboard; this workflow does not run cloudflared login."
+          echo "Check /tmp/cloudflared.log if the connector is not online."
 
+      - name: Show access information
+        run: |
           echo "=============================================="
           echo "DeepSeek Harness is running"
-          echo "Stable hostname: ${TAILSCALE_HOSTNAME}"
-          echo "Tailscale DNS: ${DNS_NAME}"
-          echo "Mac access: https://${DNS_NAME}/"
-          echo "Short MagicDNS: https://${TAILSCALE_HOSTNAME}/"
-          echo "Tailscale IP: ${IP}"
+          echo "Cloudflare hostname: https://${CLOUDFLARE_HOSTNAME}/"
           echo "Model: ${OPENROUTER_MODEL}"
           echo "Provider: OpenRouter"
           echo "Blog content directory: ${GITHUB_WORKSPACE}/content"
@@ -173,14 +139,15 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          sudo tailscale serve reset || true
-          sudo tailscale logout || true
-          if [ -f /tmp/caddy.pid ]; then kill "$(cat /tmp/caddy.pid)" 2>/dev/null || true; fi
+          if [ -f /tmp/cloudflared.pid ]; then
+            kill "$(cat /tmp/cloudflared.pid)" 2>/dev/null || true
+          fi
+          rm -f /tmp/cloudflared-token
 
       - name: Show logs
         if: always()
         run: |
           echo "===== DeepSeek Harness ====="
           cat /tmp/dsh.log || true
-          echo "===== Caddy proxy ====="
-          cat /tmp/caddy.log || true
+          echo "===== Cloudflare Tunnel ====="
+          cat /tmp/cloudflared.log || true
