@@ -1,0 +1,10 @@
+{
+  "name": "demotest-blog",
+  "private": true,
+  "scripts": {
+    "build": "vitepress build"
+  },
+  "devDependencies": {
+    "vitepress": "latest"
+  }
+}
