@@ -1,0 +1,77 @@
+name: DeepSeek Harness
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  deepseek-harness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install DeepSeek Harness
+        run: npm install -g @deepseek-ai/dsh
+
+      - name: Install Tailscale
+        run: curl -fsSL https://tailscale.com/install.sh | sh
+
+      - name: Enable IP Forward
+        run: sudo sysctl -w net.ipv4.ip_forward=1
+
+      - name: Setup NAT
+        run: sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+
+      - name: Start Tailscale
+        run: |
+          sudo tailscale up \
+            --authkey="${{ secrets.TS_KEY }}" \
+            --hostname="deepseek-harness-${{ github.run_id }}"
+
+      - name: Start DeepSeek Harness
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          nohup dsh web --host 0.0.0.0 --port 3080 --no-open > /tmp/dsh.log 2>&1 &
+          echo $! > /tmp/dsh.pid
+
+      - name: Wait for DeepSeek Harness
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:3080/ >/dev/null 2>&1; then
+              echo "DeepSeek Harness is ready"
+              break
+            fi
+            if [ "$i" -eq 60 ]; then
+              echo "DeepSeek Harness failed to start"
+              cat /tmp/dsh.log || true
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Show access information
+        run: |
+          IP=$(tailscale ip -4 | head -n1)
+          echo "=============================================="
+          echo "DeepSeek Harness is running"
+          echo "Web UI: http://${IP}:3080"
+          echo "Tailscale IP: ${IP}"
+          echo "Run ID: ${{ github.run_id }}"
+          echo "=============================================="
+
+      - name: Keep alive
+        run: sleep 5h45m
+
+      - name: Show logs
+        if: always()
+        run: cat /tmp/dsh.log || true
