@@ -20,7 +20,7 @@ env:
 jobs:
   deepseek-harness:
     runs-on: ubuntu-latest
-    timeout-minutes: 355
+    timeout-minutes: 360
 
     steps:
       - name: Checkout repository
@@ -100,7 +100,6 @@ jobs:
 
       - name: Expose Harness privately through Tailscale Serve
         run: |
-          # HTTPS Serve is private to the tailnet and proxies to localhost.
           sudo tailscale serve --bg 127.0.0.1:3080
           sleep 3
           sudo tailscale serve status || true
@@ -123,8 +122,8 @@ jobs:
           echo "Run ID: ${{ github.run_id }}"
           echo "=============================================="
 
-      - name: Keep alive
-        run: sleep 5h45m
+      - name: Keep alive for 6 hours
+        run: sleep 6h
 
       - name: Commit Markdown created by Harness
         run: |
