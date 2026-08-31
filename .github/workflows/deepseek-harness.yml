@@ -35,11 +35,9 @@ jobs:
           curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
           sudo apt-get install -y nodejs
 
-          # Make Node 24 the system Node used by every later process,
-          # including pnpm lifecycle/prepare scripts.
-          sudo ln -sf "$(command -v node)" /usr/local/bin/node
-          sudo ln -sf "$(command -v npm)" /usr/local/bin/npm
-          sudo ln -sf "$(command -v npx)" /usr/local/bin/npx
+          # NodeSource installs the system Node directly. Do not create a
+          # self-referencing symlink when /usr/local/bin is already first in PATH.
+          hash -r
 
           node --version
           npm --version
