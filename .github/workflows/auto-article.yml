@@ -52,7 +52,7 @@ jobs:
           GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           test -n "$GROK_API_KEY"
           test -n "$OPENROUTER_API_KEY"
           mkdir -p "$HOME/.dsh"
@@ -77,12 +77,14 @@ jobs:
             model: '${GROK_MODEL}'
           EOF
 
-          printf 'GROK_API_KEY=%s\nOPENROUTER_API_KEY=%s\n' "$GROK_API_KEY" "$OPENROUTER_API_KEY" > "$HOME/.dSH/.env"
+          printf 'GROK_API_KEY=%s\nOPENROUTER_API_KEY=%s\n' "$GROK_API_KEY" "$OPENROUTER_API_KEY" > "$HOME/.dsh/.env"
           chmod 600 "$HOME/.dsh/.env" "$HOME/.dsh/settings.yaml"
 
       - name: Generate article with Grok fallback
         env:
           ARTICLE_PROMPT: ${{ vars.ARTICLE_PROMPT }}
+          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p "${ARTICLE_DIR}"
