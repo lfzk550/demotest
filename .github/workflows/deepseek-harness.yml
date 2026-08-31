@@ -28,7 +28,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.19.0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -48,10 +48,11 @@ jobs:
         run: |
           mkdir -p /home/runner/.dsh/profiles/web
           cat > /home/runner/.dsh/profiles/web/pnpm-workspace.yaml <<'EOF'
-onlyBuiltDependencies:
-  - "dsh-full-remote@https://codeload.github.com/JUANWANG-BUAA/dsh-full-remote/tar.gz/abd0dfd62e7c02199cb10c8796e4b6c2152eda5c"
+allowBuilds:
+  dsh-full-remote: true
 EOF
           dsh plugin --profile web add github:JUANWANG-BUAA/dsh-full-remote
+          dsh plugin --profile web list
 
       - name: Configure Git for Harness commits
         run: |
@@ -64,11 +65,11 @@ EOF
       - name: Prepare content directory
         run: mkdir -p content
 
-      - name: Start DeepSeek Harness
+      - name: Start DeepSeek Harness web profile
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          nohup dsh web --host 127.0.0.1 --port 3080 --no-open > /tmp/dsh.log 2>&1 &
+          nohup dsh --profile web --host 127.0.0.1 --port 3080 --no-open > /tmp/dsh.log 2>&1 &
           echo $! > /tmp/dsh.pid
 
       - name: Wait for DeepSeek Harness
@@ -85,6 +86,37 @@ EOF
             fi
             sleep 5
           done
+
+      - name: Start dsh-full-remote proxy
+        run: |
+          curl -fsS \
+            -X POST \
+            -H 'Origin: http://127.0.0.1:3080' \
+            -H 'x-dsh-reverse-proxy-control: 1' \
+            http://127.0.0.1:3080/dsh-reverse-proxy/listen \
+            -H 'Content-Type: application/json' \
+            --data '{"host":"127.0.0.1","port":3081}'
+
+          curl -fsS \
+            -X POST \
+            -H 'Origin: http://127.0.0.1:3080' \
+            -H 'x-dsh-reverse-proxy-control: 1' \
+            http://127.0.0.1:3080/dsh-reverse-proxy/start
+
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:3081/_dsh_reverse_proxy/healthz >/dev/null 2>&1; then
+              echo "dsh-full-remote proxy is ready on 127.0.0.1:3081"
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "dsh-full-remote proxy failed to start"
+          curl -fsS http://127.0.0.1:3080/dsh-reverse-proxy/status \
+            -H 'Origin: http://127.0.0.1:3080' \
+            -H 'x-dsh-reverse-proxy-control: 1' || true
+          cat /tmp/dsh.log || true
+          exit 1
 
       - name: Install cloudflared
         run: |
@@ -113,6 +145,7 @@ EOF
           echo "=============================================="
           echo "DeepSeek Harness is running"
           echo "Cloudflare hostname: https://${CLOUDFLARE_HOSTNAME}/"
+          echo "Tunnel target: http://127.0.0.1:3081"
           echo "Model: ${OPENROUTER_MODEL}"
           echo "Provider: OpenRouter"
           echo "Blog content directory: ${GITHUB_WORKSPACE}/content"
