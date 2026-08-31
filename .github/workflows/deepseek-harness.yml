@@ -79,7 +79,7 @@ jobs:
           defaultModel: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
           EOF
 
-          # Harness must remain bound to localhost for safety.
+          # Harness intentionally stays on loopback. Do not expose 3080 directly.
           nohup dsh web --host 127.0.0.1 --port 3080 --no-open > /tmp/dsh.log 2>&1 &
           echo $! > /tmp/dsh.pid
 
@@ -98,9 +98,44 @@ jobs:
             sleep 5
           done
 
+      - name: Install local reverse proxy
+        run: |
+          curl -fsSL https://getcaddy.com | bash -s personal
+          sudo mv caddy /usr/local/bin/caddy
+          sudo chmod +x /usr/local/bin/caddy
+
+      - name: Start Harness compatibility proxy
+        run: |
+          cat > /tmp/Caddyfile <<'EOF'
+          :3081 {
+              reverse_proxy 127.0.0.1:3080 {
+                  header_up Host 127.0.0.1:3080
+                  header_up Origin http://127.0.0.1:3080
+              }
+          }
+          EOF
+
+          nohup caddy run --config /tmp/Caddyfile --adapter caddyfile > /tmp/caddy.log 2>&1 &
+          echo $! > /tmp/caddy.pid
+
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:3081/ >/dev/null 2>&1; then
+              echo "Compatibility proxy is ready"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "Compatibility proxy failed to start"
+              cat /tmp/caddy.log || true
+              exit 1
+            fi
+            sleep 2
+          done
+
       - name: Expose Harness privately through Tailscale Serve
         run: |
-          sudo tailscale serve --bg 127.0.0.1:3080
+          # Only the Tailscale tailnet can reach this service.
+          # Tailscale Serve terminates HTTPS; Caddy then proxies locally to Harness.
+          sudo tailscale serve --bg 127.0.0.1:3081
           sleep 3
           sudo tailscale serve status || true
 
@@ -135,12 +170,17 @@ jobs:
           git commit -m "Publish blog posts from DeepSeek Harness"
           git push origin HEAD:main
 
-      - name: Cleanup Tailscale node
+      - name: Cleanup
         if: always()
         run: |
           sudo tailscale serve reset || true
           sudo tailscale logout || true
+          if [ -f /tmp/caddy.pid ]; then kill "$(cat /tmp/caddy.pid)" 2>/dev/null || true; fi
 
       - name: Show logs
         if: always()
-        run: cat /tmp/dsh.log || true
+        run: |
+          echo "===== DeepSeek Harness ====="
+          cat /tmp/dsh.log || true
+          echo "===== Caddy proxy ====="
+          cat /tmp/caddy.log || true
