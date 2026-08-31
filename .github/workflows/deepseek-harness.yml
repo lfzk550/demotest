@@ -10,7 +10,7 @@ permissions:
 
 env:
   OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
-  OPENROUTER_MODEL: nvidia/nemotron-3-ultra-550b-a55b:free
+  OPENROUTER_MODEL: 'nvidia/nemotron-3-ultra-550b-a55b:free'
   CLOUDFLARE_HOSTNAME: dsh.ap2.ccwu.cc
 
 jobs:
@@ -33,7 +33,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10
+          version: 10.26.0
           run_install: false
 
       - name: Install DeepSeek Harness
@@ -55,12 +55,12 @@ EOF
           dsh plugin --profile web list
 
       - name: Configure Git for Harness commits
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "DeepSeek Harness Bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Prepare content directory
         run: mkdir -p content
@@ -79,11 +79,13 @@ EOF
               echo "DeepSeek Harness is ready"
               exit 0
             fi
+
             if [ "$i" -eq 60 ]; then
               echo "DeepSeek Harness failed to start"
               cat /tmp/dsh.log || true
               exit 1
             fi
+
             sleep 5
           done
 
@@ -93,8 +95,8 @@ EOF
             -X POST \
             -H 'Origin: http://127.0.0.1:3080' \
             -H 'x-dsh-reverse-proxy-control: 1' \
-            http://127.0.0.1:3080/dsh-reverse-proxy/listen \
             -H 'Content-Type: application/json' \
+            http://127.0.0.1:3080/dsh-reverse-proxy/listen \
             --data '{"host":"127.0.0.1","port":3081}'
 
           curl -fsS \
@@ -108,13 +110,15 @@ EOF
               echo "dsh-full-remote proxy is ready on 127.0.0.1:3081"
               exit 0
             fi
+
             sleep 2
           done
 
           echo "dsh-full-remote proxy failed to start"
-          curl -fsS http://127.0.0.1:3080/dsh-reverse-proxy/status \
+          curl -fsS \
             -H 'Origin: http://127.0.0.1:3080' \
-            -H 'x-dsh-reverse-proxy-control: 1' || true
+            -H 'x-dsh-reverse-proxy-control: 1' \
+            http://127.0.0.1:3080/dsh-reverse-proxy/status || true
           cat /tmp/dsh.log || true
           exit 1
 
@@ -133,10 +137,12 @@ EOF
           test -n "$CLOUDFLARE_TUNNEL_TOKEN"
           printf '%s' "$CLOUDFLARE_TUNNEL_TOKEN" > /tmp/cloudflared-token
           chmod 600 /tmp/cloudflared-token
+
           nohup cloudflared tunnel run \
             --token-file /tmp/cloudflared-token \
             > /tmp/cloudflared.log 2>&1 &
           echo $! > /tmp/cloudflared.pid
+
           sleep 5
           cat /tmp/cloudflared.log || true
 
@@ -158,10 +164,12 @@ EOF
       - name: Commit Markdown created by Harness
         run: |
           git add content/
+
           if git diff --cached --quiet; then
             echo "No new blog content to commit."
             exit 0
           fi
+
           git commit -m "Publish blog posts from DeepSeek Harness"
           git push origin HEAD:main
 
