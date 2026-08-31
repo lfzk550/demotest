@@ -12,6 +12,7 @@ permissions:
 #   GROK_API_KEY              primary key for https://api.picpi.top/v1
 #   OPENROUTER_API_KEY        fallback key for OpenRouter
 #   AGNES_API_KEY             fallback key for https://apihub.agnes-ai.com/v1
+#   TAVILY_API_KEY            Tavily web-search plugin key
 #   CLOUDFLARE_TUNNEL_TOKEN   Cloudflare tunnel token
 env:
   GROK_BASE_URL: https://api.picpi.top/v1
@@ -21,6 +22,8 @@ env:
   OPENROUTER_MINIMAX_MODEL: 'minimax/minimax-m3:free'
   AGNES_BASE_URL: https://apihub.agnes-ai.com/v1
   AGNES_MODEL: agnes-2.5-flash
+  TAVILY_BASE_URL: https://api.tavily.com
+  TAVILY_API_KEY_ENV: TAVILY_API_KEY
   CLOUDFLARE_HOSTNAME: dsh.ap2.ccwu.cc
   NODE_VERSION: '24.11.1'
   PNPM_VERSION: '10.26.0'
@@ -73,11 +76,19 @@ jobs:
       - name: Install DeepSeek Harness
         run: npm install -g @deepseek-ai/dsh
 
-      - name: Verify dsh and pnpm
+      - name: Install Tavily web-search plugin
         run: |
+          set -euxo pipefail
+          dsh plugin --profile web add github:paul-yangmy/dsh-tavily-web-search
+
+      - name: Verify dsh, plugin, and pnpm
+        run: |
+          set -euo pipefail
           node --version
           dsh --version
           pnpm --version
+          dsh --profile web --dump-config > /tmp/dsh-plugin-config.txt
+          grep -n -E 'dsh-tavily-web-search|web-search-tavily|searchProvider: tavily|tavily' /tmp/dsh-plugin-config.txt
 
       - name: Configure Git for Harness commits
         env:
@@ -104,20 +115,24 @@ jobs:
           GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           AGNES_API_KEY: ${{ secrets.AGNES_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
         run: |
           set -euo pipefail
           test -n "${GROK_API_KEY:-}"
           test -n "${OPENROUTER_API_KEY:-}"
           test -n "${AGNES_API_KEY:-}"
+          test -n "${TAVILY_API_KEY:-}"
           dsh --profile web --dump-config > /tmp/dsh-config.txt
-          grep -n -E 'grok|openrouter|agnes|GROK_API_KEY|OPENROUTER_API_KEY|AGNES_API_KEY|grok-4.6|nemotron-3-ultra-550b-a55b|minimax-m3|agnes-2.5-flash|api.picpi.top|apihub.agnes-ai.com' /tmp/dsh-config.txt || true
-          echo "Provider key presence: Grok=configured OpenRouter=configured Agnes=configured"
+          grep -n -E 'grok|openrouter|agnes|GROK_API_KEY|OPENROUTER_API_KEY|AGNES_API_KEY|grok-4.6|nemotron-3-ultra-550b-a55b|minimax-m3|agnes-2.5-flash|api.picpi.top|apihub.agnes-ai.com|tavily|TAVILY_API_KEY|web-search-tavily' /tmp/dsh-config.txt || true
+          echo "Provider keys: Grok=configured OpenRouter=configured Agnes=configured Tavily=configured"
+          echo "Tavily search provider: tavily"
 
       - name: Start DeepSeek Harness web profile
         env:
           GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           AGNES_API_KEY: ${{ secrets.AGNES_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
         run: |
           set -euo pipefail
           nohup dsh --profile web --host 127.0.0.1 --port 3080 --trusted-host dsh.ap2.ccwu.cc --no-open > /tmp/dsh.log 2>&1 &
@@ -255,6 +270,8 @@ jobs:
           echo "Fallback provider 2: agnes"
           echo "Agnes model: ${AGNES_MODEL}"
           echo "Agnes API: ${AGNES_BASE_URL}"
+          echo "Web search provider: Tavily (dsh-tavily-web-search)"
+          echo "Tavily API: ${TAVILY_BASE_URL}"
           echo "Blog content directory: ${GITHUB_WORKSPACE}/content"
           echo "Node: $(node --version)"
           echo "pnpm: $(pnpm --version)"
