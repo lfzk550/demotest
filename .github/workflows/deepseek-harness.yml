@@ -33,8 +33,19 @@ jobs:
         with:
           node-version: 22
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
       - name: Install DeepSeek Harness
         run: npm install -g @deepseek-ai/dsh
+
+      - name: Verify dsh and pnpm
+        run: |
+          dsh --version || true
+          pnpm --version
 
       - name: Install dsh-full-remote
         run: |
@@ -76,11 +87,8 @@ jobs:
 
       - name: Start dsh-full-remote proxy
         run: |
-          # The plugin's remote proxy listens on loopback and rewrites
-          # Host/Origin for Harness privileged APIs.
-          # The exact control endpoint is kept local and is not exposed by CF Tunnel.
-          echo "dsh-full-remote installed; start its reverse proxy from the web profile."
-          echo "See /tmp/dsh.log for the profile startup output."
+          echo "dsh-full-remote installed in the web profile."
+          echo "Check /tmp/dsh.log for the profile startup output."
 
       - name: Install cloudflared
         run: |
