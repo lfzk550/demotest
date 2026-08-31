@@ -120,6 +120,7 @@ jobs:
 
       - name: Start dsh-full-remote proxy
         run: |
+          set -euxo pipefail
           curl -fsS \
             -X POST \
             -H 'Origin: http://127.0.0.1:3080' \
@@ -152,6 +153,7 @@ jobs:
 
       - name: Install cloudflared
         run: |
+          set -euxo pipefail
           curl -fsSL --retry 5 --retry-delay 2 \
             -o /tmp/cloudflared.deb \
             https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
@@ -162,6 +164,7 @@ jobs:
         env:
           CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
         run: |
+          set -euxo pipefail
           test -n "$CLOUDFLARE_TUNNEL_TOKEN"
           printf '%s' "$CLOUDFLARE_TUNNEL_TOKEN" > /tmp/cloudflared-token
           chmod 600 /tmp/cloudflared-token
@@ -170,7 +173,80 @@ jobs:
             > /tmp/cloudflared.log 2>&1 &
           echo $! > /tmp/cloudflared.pid
           sleep 5
+
+          if ! kill -0 "$(cat /tmp/cloudflared.pid)" 2>/dev/null; then
+            echo "cloudflared exited immediately"
+            cat /tmp/cloudflared.log || true
+            exit 1
+          fi
+
           cat /tmp/cloudflared.log || true
+
+      - name: Verify Cloudflare Tunnel and public HTTPS endpoint
+        shell: bash
+        run: |
+          set -u
+          url="https://${CLOUDFLARE_HOSTNAME}/"
+          echo "Checking public endpoint: ${url}"
+          echo "Expected origin: http://127.0.0.1:3081"
+
+          # First prove the local origin is still alive.
+          if ! curl -fsS --connect-timeout 5 --max-time 10 \
+            http://127.0.0.1:3081/_dsh_reverse_proxy/healthz \
+            -o /tmp/local-healthz; then
+            echo "Local dsh-full-remote health check failed"
+            cat /tmp/dsh.log || true
+            exit 1
+          fi
+          echo "Local proxy healthz: OK"
+          cat /tmp/local-healthz || true
+
+          # A connector process can start successfully while the hostname is
+          # still misconfigured in Cloudflare. Verify the actual public path.
+          last_status=""
+          last_error=""
+          for i in {1..30}; do
+            if ! kill -0 "$(cat /tmp/cloudflared.pid)" 2>/dev/null; then
+              echo "cloudflared stopped before public endpoint became reachable"
+              cat /tmp/cloudflared.log || true
+              exit 1
+            fi
+
+            rm -f /tmp/public-response
+            status="$(curl -sS -L \
+              --connect-timeout 10 \
+              --max-time 20 \
+              -o /tmp/public-response \
+              -w '%{http_code}' \
+              "$url" 2>/tmp/public-curl-error || true)"
+            error="$(cat /tmp/public-curl-error 2>/dev/null || true)"
+            last_status="$status"
+            last_error="$error"
+
+            echo "Public check ${i}/30: HTTP ${status:-curl-failed}"
+            if [ -s /tmp/public-response ]; then
+              head -c 500 /tmp/public-response || true
+              echo
+            fi
+
+            case "$status" in
+              2??|3??)
+                echo "Public HTTPS endpoint is reachable: ${url}"
+                exit 0
+                ;;
+            esac
+
+            sleep 5
+          done
+
+          echo "Public HTTPS endpoint is NOT reachable after 30 attempts."
+          echo "Last HTTP status: ${last_status:-none}"
+          echo "Last curl error: ${last_error:-none}"
+          echo "===== cloudflared log ====="
+          cat /tmp/cloudflared.log || true
+          echo "===== local DSH log ====="
+          cat /tmp/dsh.log || true
+          exit 1
 
       - name: Show access information
         run: |
