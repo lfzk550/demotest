@@ -63,22 +63,22 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${ARTICLE_DIR}"
-          rm -f /tmp/article-output.md
+          rm -f /tmp/article-output.md /tmp/article-error.log
 
-          cat > /tmp/article-task.txt <<EOF
-You are an autonomous article writing agent.
-
-User requirement:
-${ARTICLE_PROMPT}
-
-Rules:
-1. Use web_search to collect the latest information before writing.
-2. Cross-check important facts and do not invent current offers.
-3. Write exactly ONE complete Markdown article.
-4. Output ONLY the article Markdown text. Do not output commentary, code fences, progress messages, tool logs, or explanations outside the article.
-5. The workflow will save your output into content/ and handle Git commit/push.
-6. Do not run git commit, git push, or any other Git write operation.
-EOF
+          printf '%s\n' \
+            'You are an autonomous article writing agent.' \
+            '' \
+            'User requirement:' \
+            "${ARTICLE_PROMPT}" \
+            '' \
+            'Rules:' \
+            '1. Use web_search to collect the latest information before writing.' \
+            '2. Cross-check important facts and do not invent current offers.' \
+            '3. Write exactly ONE complete Markdown article.' \
+            '4. Output ONLY the article Markdown text. Do not output commentary, code fences, progress messages, tool logs, or explanations outside the article.' \
+            '5. The workflow will save your output into content/ and handle Git commit/push.' \
+            '6. Do not run git commit, git push, or any other Git write operation.' \
+            > /tmp/article-task.txt
 
           if dsh --profile headless "$(cat /tmp/article-task.txt)" > /tmp/article-output.md 2>/tmp/article-error.log; then
             echo "Article generated with Grok primary model (${GROK_MODEL})"
@@ -96,9 +96,6 @@ EOF
             exit 1
           fi
 
-          # DSH currently returns the generated article on stdout rather than
-          # reliably creating a repository file. Save stdout explicitly.
-          # Remove an accidental Markdown code fence if the model added one.
           sed -i '/^[[:space:]]*```[[:space:]]*markdown[[:space:]]*$/d; /^[[:space:]]*```[[:space:]]*$/d' /tmp/article-output.md
 
           ARTICLE_FILE="${ARTICLE_DIR}/$(date -u +%Y-%m-%d)-ai-freebies.md"
