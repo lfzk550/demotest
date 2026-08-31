@@ -1,13 +1,13 @@
 name: DeepSeek Harness
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
   schedule:
     - cron: '0 */6 * * *'
 
 concurrency:
   group: deepseek-harness
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -19,6 +19,7 @@ env:
 
 jobs:
   deepseek-harness:
+    name: DeepSeek Harness
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
@@ -44,7 +45,7 @@ jobs:
 
       - name: Verify dsh and pnpm
         run: |
-          dsh --version || true
+          dsh --version
           pnpm --version
 
       - name: Install dsh-full-remote
@@ -67,12 +68,11 @@ EOF
       - name: Prepare content directory
         run: mkdir -p content
 
-      - name: Start DeepSeek Harness with remote profile
+      - name: Start DeepSeek Harness
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          mkdir -p ~/.deepseek-harness
-          nohup dsh --profile web > /tmp/dsh.log 2>&1 &
+          nohup dsh web --host 127.0.0.1 --port 3080 --no-open > /tmp/dsh.log 2>&1 &
           echo $! > /tmp/dsh.pid
 
       - name: Wait for DeepSeek Harness
@@ -80,7 +80,7 @@ EOF
           for i in {1..60}; do
             if curl -fsS http://127.0.0.1:3080/ >/dev/null 2>&1; then
               echo "DeepSeek Harness is ready"
-              break
+              exit 0
             fi
             if [ "$i" -eq 60 ]; then
               echo "DeepSeek Harness failed to start"
@@ -89,11 +89,6 @@ EOF
             fi
             sleep 5
           done
-
-      - name: Start dsh-full-remote proxy
-        run: |
-          echo "dsh-full-remote installed in the web profile."
-          echo "Check /tmp/dsh.log for the profile startup output."
 
       - name: Install cloudflared
         run: |
@@ -110,20 +105,12 @@ EOF
           test -n "$CLOUDFLARE_TUNNEL_TOKEN"
           printf '%s' "$CLOUDFLARE_TUNNEL_TOKEN" > /tmp/cloudflared-token
           chmod 600 /tmp/cloudflared-token
-
           nohup cloudflared tunnel run \
             --token-file /tmp/cloudflared-token \
             > /tmp/cloudflared.log 2>&1 &
           echo $! > /tmp/cloudflared.pid
-
           sleep 5
           cat /tmp/cloudflared.log || true
-
-      - name: Verify fixed hostname
-        run: |
-          echo "Expected fixed hostname: https://${CLOUDFLARE_HOSTNAME}/"
-          echo "Cloudflare Tunnel is managed by the Dashboard; this workflow does not run cloudflared login."
-          echo "Check /tmp/cloudflared.log if the connector is not online."
 
       - name: Show access information
         run: |
