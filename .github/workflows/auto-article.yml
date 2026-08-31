@@ -13,6 +13,9 @@ env:
   GROK_MODEL: grok-4.6
   OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
   OPENROUTER_MODEL: 'nvidia/nemotron-3-ultra-550b-a55b:free'
+  OPENROUTER_MINIMAX_MODEL: 'minimax/minimax-m3:free'
+  AGNES_BASE_URL: https://apihub.agnes-ai.com/v1
+  AGNES_MODEL: agnes-2.5-flash
   ARTICLE_DIR: content
 
 jobs:
@@ -47,19 +50,21 @@ jobs:
       - name: Install DeepSeek Harness
         run: npm install -g @deepseek-ai/dsh
 
-      - name: Configure Grok primary and OpenRouter fallback
+      - name: Configure Grok primary, OpenRouter fallback, and Agnes fallback
         env:
           GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          AGNES_API_KEY: ${{ secrets.AGNES_API_KEY }}
         run: |
           set -euo pipefail
           bash .github/scripts/configure-dsh-providers.sh grok
 
-      - name: Generate article with Grok fallback
+      - name: Generate article with Grok, OpenRouter, and Agnes fallbacks
         env:
           ARTICLE_PROMPT: ${{ vars.ARTICLE_PROMPT }}
           GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          AGNES_API_KEY: ${{ secrets.AGNES_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p "${ARTICLE_DIR}"
@@ -86,8 +91,16 @@ jobs:
             echo "Grok failed; retrying with OpenRouter fallback (${OPENROUTER_MODEL})"
             cat /tmp/article-error.log >&2 || true
             bash .github/scripts/configure-dsh-providers.sh openrouter
-            dsh --profile headless "$(cat /tmp/article-task.txt)" > /tmp/article-output.md 2>/tmp/article-error.log
-            echo "Article generated with OpenRouter fallback (${OPENROUTER_MODEL})"
+
+            if dsh --profile headless "$(cat /tmp/article-task.txt)" > /tmp/article-output.md 2>/tmp/article-error.log; then
+              echo "Article generated with OpenRouter fallback (${OPENROUTER_MODEL})"
+            else
+              echo "OpenRouter failed; retrying with Agnes fallback (${AGNES_MODEL})"
+              cat /tmp/article-error.log >&2 || true
+              bash .github/scripts/configure-dsh-providers.sh agnes
+              dsh --profile headless "$(cat /tmp/article-task.txt)" > /tmp/article-output.md 2>/tmp/article-error.log
+              echo "Article generated with Agnes fallback (${AGNES_MODEL})"
+            fi
           fi
 
           if [ ! -s /tmp/article-output.md ]; then
