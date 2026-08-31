@@ -85,7 +85,7 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           set -euxo pipefail
-          nohup dsh --profile web --host 127.0.0.1 --port 3080 --no-open > /tmp/dsh.log 2>&1 &
+          nohup dsh --profile web --host 127.0.0.1 --port 3080 --trusted-host dsh.ap2.ccwu.cc --no-open > /tmp/dsh.log 2>&1 &
           echo $! > /tmp/dsh.pid
 
       - name: Wait for DeepSeek Harness
@@ -168,12 +168,6 @@ jobs:
             fi
 
             rm -f /tmp/public-response /tmp/public-curl-error
-
-            # Do not follow redirects. Cloudflare Access commonly returns a
-            # redirect to its login flow when the request is unauthenticated.
-            # A 2xx, 3xx, 401 or 403 proves that the public edge is reachable;
-            # following the login redirect can turn a healthy Tunnel into a
-            # false timeout in this non-interactive CI check.
             status="$(curl -sS \
               --connect-timeout 10 \
               --max-time 20 \
@@ -216,6 +210,7 @@ jobs:
           echo "DeepSeek Harness is running"
           echo "Cloudflare hostname: https://${CLOUDFLARE_HOSTNAME}/"
           echo "Tunnel target: http://127.0.0.1:3080"
+          echo "DSH trusted host: ${CLOUDFLARE_HOSTNAME}"
           echo "Model: ${OPENROUTER_MODEL}"
           echo "Provider: OpenRouter"
           echo "Blog content directory: ${GITHUB_WORKSPACE}/content"
