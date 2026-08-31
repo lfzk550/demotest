@@ -9,6 +9,8 @@ permissions:
   contents: write
 
 env:
+  GROK_BASE_URL: https://api.picpi.top
+  GROK_MODEL: grok-4.6
   OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
   OPENROUTER_MODEL: 'nvidia/nemotron-3-ultra-550b-a55b:free'
   ARTICLE_DIR: content
@@ -45,17 +47,25 @@ jobs:
       - name: Install DeepSeek Harness
         run: npm install -g @deepseek-ai/dsh
 
-      - name: Configure OpenRouter
+      - name: Configure Grok primary and OpenRouter fallback
         env:
+          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           set -euxo pipefail
+          test -n "$GROK_API_KEY"
           test -n "$OPENROUTER_API_KEY"
           mkdir -p "$HOME/.dsh"
 
           cat > "$HOME/.dsh/settings.yaml" <<EOF
           llm-pi-ai:
             providers:
+              grok:
+                api: openai-completions
+                baseURL: ${GROK_BASE_URL}
+                apiKeyEnv: GROK_API_KEY
+                models:
+                  - id: '${GROK_MODEL}'
               openrouter:
                 api: openai-completions
                 baseURL: ${OPENROUTER_BASE_URL}
@@ -63,14 +73,14 @@ jobs:
                 models:
                   - id: '${OPENROUTER_MODEL}'
           agent-default-model:
-            provider: openrouter
-            model: '${OPENROUTER_MODEL}'
+            provider: grok
+            model: '${GROK_MODEL}'
           EOF
 
-          printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY" > "$HOME/.dsh/.env"
+          printf 'GROK_API_KEY=%s\nOPENROUTER_API_KEY=%s\n' "$GROK_API_KEY" "$OPENROUTER_API_KEY" > "$HOME/.dsh/.env"
           chmod 600 "$HOME/.dsh/.env" "$HOME/.dsh/settings.yaml"
 
-      - name: Generate article
+      - name: Generate article with Grok fallback
         env:
           ARTICLE_PROMPT: ${{ vars.ARTICLE_PROMPT }}
         run: |
@@ -92,7 +102,12 @@ jobs:
           6. Do not modify workflow files.
           EOF
 
-          dsh --profile headless "$(cat /tmp/article-task.txt)"
+          if ! dsh --profile headless "$(cat /tmp/article-task.txt)"; then
+            echo "Grok failed, retrying with OpenRouter fallback"
+            sed -i "s/provider: grok/provider: openrouter/" "$HOME/.dsh/settings.yaml"
+            sed -i "s/model: '${GROK_MODEL}'/model: '${OPENROUTER_MODEL}'/" "$HOME/.dsh/settings.yaml"
+            dsh --profile headless "$(cat /tmp/article-task.txt)"
+          fi
 
       - name: Validate article
         run: |
